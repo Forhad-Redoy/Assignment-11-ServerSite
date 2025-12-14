@@ -183,6 +183,54 @@ async function run() {
       res.send(result);
     });
 
+    // delete meal create by chef
+    app.delete("/meals/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await mealsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    // update meal
+    // app.patch("/meals/:id", async (req, res) => {
+    //   const id = req.params.id;
+    //   const updatedMeal = req.body;
+
+    //   const result = await mealsCollection.updateOne(
+    //     { _id: new ObjectId(id) },
+    //     { $set: updatedMeal }
+    //   );
+
+    //   res.send(result);
+    // });
+    app.patch("/meals/:id", async (req, res) => {
+      const id = req.params.id;
+      const updated = req.body;
+
+      const updateDoc = {
+        $set: {
+          foodName: updated.foodName,
+          chefName: updated.chefName,
+          foodImage: updated.foodImage,
+          price: updated.price,
+          ingredients: updated.ingredients,
+          estimatedDeliveryTime: updated.estimatedDeliveryTime,
+          deliveryArea: updated.deliveryArea,
+          chefExperience: updated.chefExperience,
+          chefId: updated.chefId,
+          updatedAt: new Date(),
+        },
+      };
+
+      const result = await mealsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        updateDoc
+      );
+
+      res.send(result);
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
