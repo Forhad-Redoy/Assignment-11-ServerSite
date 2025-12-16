@@ -54,6 +54,9 @@ async function run() {
     const db = client.db("mealsDB");
     const mealsCollection = db.collection("meals");
     const orderCollection = db.collection("orders");
+    const paymentCollection = db.collection("paymets");
+    const usersCollection = db.collection("users");
+    const roleRequestsCollection = db.collection("roles");
 
     // Save all meals in db
     app.post("/meals", async (req, res) => {
@@ -231,6 +234,118 @@ async function run() {
       res.send(result);
     });
 
+    // GET orders for a specific chef
+    app.get("/chef-orders/:chefId", async (req, res) => {
+      const chefId = req.params.chefId;
+
+      const result = await orderCollection
+        .find({ chefId })
+        .sort({ orderTime: -1 })
+        .toArray();
+
+      res.send(result);
+    });
+
+    // PATCH order status
+    app.patch("/orders/:id/status", async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body; // "cancelled" | "accepted" | "delivered"
+
+      const allowed = ["cancelled", "accepted", "delivered"];
+      if (!allowed.includes(status)) {
+        return res.status(400).send({ message: "Invalid status" });
+      }
+
+      const order = await orderCollection.findOne({ _id: new ObjectId(id) });
+      if (!order) return res.status(404).send({ message: "Order not found" });
+
+      // Basic rules (server-side safety)
+      if (
+        order.orderStatus === "cancelled" ||
+        order.orderStatus === "delivered"
+      ) {
+        return res.status(400).send({ message: "Order already finalized" });
+      }
+      if (status === "delivered" && order.orderStatus !== "accepted") {
+        return res.status(400).send({ message: "Must accept before deliver" });
+      }
+
+      const result = await orderCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { orderStatus: status } }
+      );
+
+      res.send(result);
+    });
+
+    // save or update a user in db
+    app.post("/user", async (req, res) => {
+      const userData = req.body;
+      userData.email = userData.email.toLowerCase().trim();
+      userData.created_at = new Date().toISOString();
+      userData.last_loggedIn = new Date().toISOString();
+      userData.role = "user";
+      userData.status = "active";
+      userData.chefId = null;
+
+      const query = {
+        email: userData.email,
+      };
+
+      const alreadyExists = await usersCollection.findOne(query);
+      console.log("User Already Exists---> ", !!alreadyExists);
+
+      if (alreadyExists) {
+        console.log("Updating user info......");
+        const result = await usersCollection.updateOne(query, {
+          $set: {
+            last_loggedIn: new Date().toISOString(),
+          },
+        });
+        return res.send(result);
+      }
+
+      console.log("Saving new user info......");
+      const result = await usersCollection.insertOne(userData);
+      res.send(result);
+    });
+
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email.toLowerCase().trim();
+
+      const user = await usersCollection.findOne({ email });
+
+      if (!user) {
+        return res.status(404).send({ message: "User not found" });
+      }
+
+      res.send(user);
+    });
+    // POST /role-requests
+    app.post("/role-requests", async (req, res) => {
+      const { userName, userEmail, requestType } = req.body;
+
+      // optional: prevent duplicate pending requests
+      const alreadyPending = await roleRequestsCollection.findOne({
+        userEmail,
+        requestType,
+        requestStatus: "pending",
+      });
+      if (alreadyPending) {
+        return res.status(409).send({ message: "Request already pending" });
+      }
+
+      const doc = {
+        userName,
+        userEmail,
+        requestType, // "chef" or "admin"
+        requestStatus: "pending",
+        requestTime: new Date().toISOString(),
+      };
+
+      const result = await roleRequestsCollection.insertOne(doc);
+      res.send(result);
+    });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
