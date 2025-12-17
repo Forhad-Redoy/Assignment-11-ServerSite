@@ -57,6 +57,14 @@ async function run() {
     const paymentCollection = db.collection("paymets");
     const usersCollection = db.collection("users");
     const roleRequestsCollection = db.collection("roles");
+    const reviewsCollection = db.collection("reviews");
+    const favoritesCollection = db.collection("favorites");
+
+    await favoritesCollection.createIndex(
+      { userEmail: 1, mealId: 1 },
+      { unique: true }
+    );
+    const { ObjectId } = require("mongodb");
 
     // Save all meals in db
     app.post("/meals", async (req, res) => {
@@ -178,6 +186,165 @@ async function run() {
 
       res.send({ success: false, message: "Payment not completed." });
     });
+
+    //  Add Review in db
+    app.post("/reviews", async (req, res) => {
+      try {
+        const review = req.body;
+
+        // basic validation
+        if (
+          !review?.foodId ||
+          !review?.reviewerName ||
+          !review?.rating ||
+          !review?.comment
+        ) {
+          return res.status(400).send({ message: "Missing required fields" });
+        }
+
+        const data = {
+          foodId: new ObjectId(review.foodId),
+          mealName: review.mealName || "",
+          userEmail: review.userEmail || "",
+          reviewerName: review.reviewerName,
+          reviewerImage: review.reviewerImage || "",
+          rating: Number(review.rating),
+          comment: review.comment,
+          date: new Date(),
+        };
+
+        const result = await reviewsCollection.insertOne(data);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+    //  Get reviews by meal
+    app.get("/reviews/meal/:foodId", async (req, res) => {
+      try {
+        const foodId = new ObjectId(req.params.foodId);
+
+        const result = await reviewsCollection.find({ foodId }).toArray();
+
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+    //  Get reviews by user (My Reviews page)
+    app.get("/reviews/user/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const result = await reviewsCollection
+          .find({ userEmail: email })
+          .sort({ date: -1 })
+          .toArray();
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+    //  Delete review
+    app.delete("/reviews/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await reviewsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+    //  Update review (rating/comment)
+    app.patch("/reviews/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { rating, comment } = req.body;
+
+        const updateDoc = {
+          $set: {
+            rating: Number(rating),
+            comment,
+            date: new Date().toISOString(), // optional: update time
+          },
+        };
+
+        const result = await reviewsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          updateDoc
+        );
+
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+     // Add to favorites (no duplicate)
+    app.post("/favorites", async (req, res) => {
+      try {
+        const fav = req.body;
+
+        if (!fav?.userEmail || !fav?.mealId) {
+          return res
+            .status(400)
+            .send({ message: "Missing userEmail or mealId" });
+        }
+
+        const data = {
+          userEmail: fav.userEmail,
+          mealId: fav.mealId, // meal _id as string
+          mealName: fav.mealName,
+          chefId: fav.chefId,
+          chefName: fav.chefName,
+          price: fav.price || "",
+          addedTime: new Date().toISOString(),
+        };
+
+        // since we created unique index, this will throw if duplicate
+        const result = await favoritesCollection.insertOne(data);
+        res.send({ inserted: true, result });
+      } catch (err) {
+        // duplicate key error
+        if (err?.code === 11000) {
+          return res.status(409).send({ message: "Already in favorites" });
+        }
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+    //  Get favorites by user
+    app.get("/favorites/user/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const result = await favoritesCollection
+          .find({ userEmail: email })
+          .sort({ addedTime: -1 })
+          .toArray();
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+    //  Delete favorite
+    app.delete("/favorites/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await favoritesCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: err.message });
+      }
+    });
+
 
     // get meals by chef email
     app.get("/meals/chef/:email", async (req, res) => {
@@ -346,6 +513,10 @@ async function run() {
       const result = await roleRequestsCollection.insertOne(doc);
       res.send(result);
     });
+
+    
+
+   
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
